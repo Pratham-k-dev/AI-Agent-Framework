@@ -2,7 +2,7 @@ from .workspace import Workspace
 from .tools import RunPythonTool, ReadFileTool,WriteFileTool,AppendFileTool,DeleteFileTool,LocalRuntime
 from .prompt_builder import PromptBuilder
 import time
-from google.genai.errors import ClientError
+from google.genai.errors import ClientError,ServerError
 import json
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
@@ -11,6 +11,8 @@ from .Memory.memory import ConversationMemory
 from .Memory.store import SQLiteStore
 from .Memory.context import ContextBuilder
 from .Memory.optimizer import ContextOptimizer,Summarizer
+import sys
+from yaspin import yaspin
 # class MockAction:
 #     def __init__(self):
 #         self.thought = "Write fibonacci to code.py"
@@ -54,14 +56,16 @@ class AgentEvent:
     data: Any
 
 
-class Toolagent:
+class ToolAgent:
     def __init__(
         self,
         model,
         tools,
         max_iterations=2,
         cli_stream=False,
-        callback=None
+        callback=None,
+        description=None,
+        session_id="abc"
     ):
         self.model = model
         self.workspace = Workspace("./myagents/WorkSpace")
@@ -87,6 +91,7 @@ class Toolagent:
         self.system_prompt = PromptBuilder.build_system_prompt(
             self.tools
         )
+        self.session_id=session_id
         self.cli_stream=cli_stream
         self.callback = callback
         self.memory = ConversationMemory(
@@ -94,8 +99,9 @@ class Toolagent:
             builder=ContextBuilder(),
             optimizer=ContextOptimizer(),
             summarizer=Summarizer(),
-            session_id="my_id"
+            session_id=self.session_id
         )
+        self.description=description
         
     def _emit(self, event_type: EventType, data: Any):
             """
@@ -141,6 +147,22 @@ class Toolagent:
                 print(f"❌ {event.data}")
 
     def run(self, task: str):
+        if sys.stdout.isatty():
+            print("="*75)
+        
+            BANNER = r"""
+███╗   ███╗██╗   ██╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗███████╗
+████╗ ████║╚██╗ ██╔╝    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██╔════╝
+██╔████╔██║ ╚████╔╝     ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ███████╗
+██║╚██╔╝██║  ╚██╔╝      ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ╚════██║
+██║ ╚═╝ ██║   ██║       ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ███████║
+╚═╝     ╚═╝   ╚═╝       ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝
+
+          Autonomous Agent Framework
+"""
+
+            print(BANNER)
+            print("="*75)
 
         self.memory.add_user_message(
                 
@@ -164,17 +186,32 @@ class Toolagent:
                 self.system_prompt
             )
             action=None
-            try:
-                action = self.model.generate(gemini_messages,AgentAction)
-                # action = MockAction()
-            except ClientError as e:
+            MAX_RETRIES = 3
 
-                
-                if e.code == 429:
-                    wait = 20   # simple backoff
-                    print(f"Rate limit hit. Retrying in {wait}s...")
+            for attempt in range(MAX_RETRIES):
+
+                try:
+                    spinner=None
+                    if sys.stdout.isatty():
+                        spinner = yaspin(text="Thinking...", color="cyan")
+                    if spinner:
+                        spinner.start()
+                    action = self.model.generate(
+                        gemini_messages,
+                        AgentAction
+                    )
+                    if spinner:
+                        spinner.stop()
+                    break
+
+                except ServerError:
+                    if attempt == MAX_RETRIES - 1:
+                        raise
+
+                    wait = 2 ** attempt
+                    
+                    print(f"Server error. Retrying in {wait}s...")
                     time.sleep(wait)
-                raise
                     
             if(not action):
                 continue

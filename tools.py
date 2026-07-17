@@ -263,6 +263,71 @@ class DecoratedTool(BaseTool):
 def _tool(func):
     return DecoratedTool(func)
 
+class AgentTool(BaseTool):
+
+    def __init__(self, agent):
+        self.agent = agent
+
+        self.name = agent.name
+        self.description = agent.description
+
+        self.parameters = {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Task to delegate to the agent."
+                }
+            },
+            "required": ["task"],
+        }
+
+    def execute(self, task: str) -> ToolResult:
+
+        result = self.agent.run(task)
+
+        if isinstance(result, ToolResult):
+            return result
+
+        return ToolResult(
+            success=True,
+            output=result,
+        )
+    
+class AgentTool(BaseTool):
+
+    def __init__(self, agent):
+        self.agent = agent
+
+        self.name = agent.name
+        self.description = agent.description
+
+        self.parameters = {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Task to delegate to the agent."
+                }
+            },
+            "required": ["task"],
+        }
+
+    def execute(self, task: str) -> ToolResult:
+
+        result = self.agent.run(task)
+
+        if isinstance(result, ToolResult):
+            return result
+
+        return ToolResult(
+            success=True,
+            output=result,
+        )
+
+
+def agent_tool(agent):
+    return AgentTool(agent)
 from ddgs import DDGS
 
 @_tool
@@ -271,6 +336,8 @@ def duckduckgo_search(query: str, max_results: int = 5):
     Search the web using DuckDuckGo.
 
     Returns the top search results including title, URL and snippet.
+
+    
     """
 
     with DDGS() as ddgs:

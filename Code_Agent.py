@@ -1,7 +1,7 @@
 from .workspace import  Workspace
 from .prompt_builder import PromptBuilder
 import time
-from google.genai.errors import ClientError
+from google.genai.errors import ClientError,ServerError
 from dataclasses import dataclass
 from typing import Any
 from enum import Enum
@@ -14,11 +14,17 @@ from .schemas import CodeAgentAction
 from .tools import WriteFileTool,LocalRuntime, RunPythonTool
 from pathlib import Path
 from yaspin import yaspin
+import sys
+
+ROOT=Path(__file__).resolve().parent
 
 
 
 
 class EventType(str, Enum):
+    BANNER="banner"
+    THINKING_STARTED="TH1"
+    THINKING_ENDED="TH2"
     THOUGHT = "thought"
     CODE = "code"
     OBSERVATION = "observation"
@@ -85,10 +91,13 @@ class CodeAgent:
         max_iterations=2,
         cli_stream=False,
         callback=None,
+        description=None,
+        session_id="my_id",
+        name=""
     ):
 
         self.model = model
-
+        WorkDir=ROOT/"Workspace"
         self.workspace = Workspace("./myagents/Workspace")
         
         self.tools = {}
@@ -106,17 +115,20 @@ class CodeAgent:
 
         self.cli_stream = cli_stream
         self.callback = callback
-
+        self.session_id=session_id
+        storedir=ROOT/"memory.db"
         self.memory = ConversationMemory(
-            store=SQLiteStore(db_path="myagents/memory.db"),
+            store=SQLiteStore(db_path=str(storedir)),
             builder=ContextBuilder(),
             optimizer=ContextOptimizer(),
             summarizer=Summarizer(),
-            session_id="my_id"
+            session_id=self.session_id
         )
         self.runtime=LocalRuntime()
         self.write_tool=WriteFileTool(self.workspace)
         self.run_tool=RunPythonTool(self.workspace,self.runtime )
+        self.description=description
+        self.name=name
         
 
     # -------------------------------------------------------
@@ -138,6 +150,29 @@ class CodeAgent:
     def cli_callback(self, event: AgentEvent):
 
         match event.type:
+            case EventType.BANNER:
+                print("="*75)
+                BANNER = r"""
+███╗   ███╗██╗   ██╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗███████╗
+████╗ ████║╚██╗ ██╔╝    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██╔════╝
+██╔████╔██║ ╚████╔╝     ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ███████╗
+██║╚██╔╝██║  ╚██╔╝      ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ╚════██║
+██║ ╚═╝ ██║   ██║       ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ███████║
+╚═╝     ╚═╝   ╚═╝       ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝
+
+          Autonomous Agent Framework
+"""
+
+                print(BANNER)
+                print("="*75)
+            case EventType.THINKING_STARTED:
+                if event.data and sys.stdout.isatty():
+                    spinner=event.data
+                    spinner.start()
+            case EventType.THINKING_ENDED:
+                if event.data and sys.stdout.isatty():
+                    spinner = event.data
+                    spinner.stop()
 
             case EventType.THOUGHT:
                 print(f"💭 {event.data}")
@@ -203,20 +238,7 @@ class CodeAgent:
         return True
 
     def run(self, task: str):
-        print("="*75)
-        BANNER = r"""
-███╗   ███╗██╗   ██╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗███████╗
-████╗ ████║╚██╗ ██╔╝    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██╔════╝
-██╔████╔██║ ╚████╔╝     ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ███████╗
-██║╚██╔╝██║  ╚██╔╝      ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ╚════██║
-██║ ╚═╝ ██║   ██║       ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ███████║
-╚═╝     ╚═╝   ╚═╝       ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝
-
-          Autonomous Agent Framework
-"""
-
-        print(BANNER)
-        print("="*75)
+        self._emit(EventType.BANNER,"")
 
         self.memory.add_user_message(task)
 
@@ -225,28 +247,34 @@ class CodeAgent:
             gemini_messages = self.memory.build_context(
                 self.system_prompt
             )
+            MAX_RETRIES = 3
 
-            try:
-                spinner = yaspin(text="Thinking...", color="cyan")
-                spinner.start()
-                action = self.model.generate(
-                    gemini_messages,
-                    CodeAgentAction
-                )
-                spinner.stop()
-                pass
+            for attempt in range(MAX_RETRIES):
 
-            except ClientError as e:
-
-                if e.code == 429:
-                    wait = 20
-                    print(
-                        f"Rate limit hit. Retrying in {wait}s..."
+                try:
+                    spinner=None
+                    if sys.stdout.isatty():
+                        spinner = yaspin(text="Thinking...", color="cyan")
+                    self._emit(EventType.THINKING_STARTED,spinner)
+                    action = self.model.generate(
+                        gemini_messages,
+                        CodeAgentAction
                     )
+                    self._emit(EventType.THINKING_ENDED,spinner)
+                    
+                    break
+
+                except ServerError:
+                    if attempt == MAX_RETRIES - 1:
+                        raise
+
+                    wait = 2 ** attempt
+                    
+                    print(f"Server error. Retrying in {wait}s...")
                     time.sleep(wait)
-
-                raise
-
+                except Exception as e:
+                    print(f"Unexpected {type(e).__name__}: {e}")
+                    raise
             
             if not action:
                 continue
@@ -277,8 +305,8 @@ class CodeAgent:
             if(not action.code):
                 continue
 
-
             approved = self._request_execution(action.code)
+            
 
             if not approved:
                 observation = (
@@ -286,8 +314,13 @@ class CodeAgent:
                     "Generate a different solution or explain why execution is required."
                 )
             else:
-                spinner = yaspin(text="Executing...", color="cyan")
-                spinner.start()
+                # spinner = yaspin(text="Executing...", color="cyan")
+                # spinner.start()
+                spinner=None
+                if sys.stdout.isatty():
+                    spinner = yaspin(text="Executing...", color="cyan")
+                if spinner:
+                    spinner.start()
                 runtime = build_runtime(
                     action.code,
                     self.tool_paths,
@@ -304,8 +337,10 @@ class CodeAgent:
                     entry="runtime.py",
                 )
                 observation="Code's result is:\n"+observation.output
+                if spinner:
+                    spinner.stop()
                 
-                spinner.stop()
+                # spinner.stop()
             self._emit(
                 EventType.OBSERVATION,
                 observation

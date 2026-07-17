@@ -5,6 +5,7 @@ from uuid import uuid4
 from .store import SQLiteStore
 from .context import ContextBuilder
 from .optimizer import ContextOptimizer , Summarizer
+from datetime import datetime
 
 
 class ConversationMemory:
@@ -49,7 +50,7 @@ class ConversationMemory:
         self.store.add_message(
             self.session_id,
             "user",
-            content,
+            f"[{datetime.now()}]  {content}",
         )
 
     def add_assistant_message(self, content: str):
