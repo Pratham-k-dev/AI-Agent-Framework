@@ -330,20 +330,48 @@ def agent_tool(agent):
     return AgentTool(agent)
 from ddgs import DDGS
 
+import requests
+import trafilatura
+
+
 @_tool
-def duckduckgo_search(query: str, max_results: int = 5):
+def web_search(
+    query: str,
+    max_results: int = 3,
+):
     """
-    Search the web using DuckDuckGo.
-
-    Returns the top search results including title, URL and snippet.
-
-    
+    Search the web and return synthesized information from the top pages.
     """
+
+    output = []
 
     with DDGS() as ddgs:
         results = list(ddgs.text(query, max_results=max_results))
 
-    return results
+    for result in results:
+        url = result["href"]
+
+        try:
+            html = requests.get(
+                url,
+                timeout=10,
+                headers={
+                    "User-Agent": "Mozilla/5.0"
+                },
+            ).text
+
+            text = trafilatura.extract(html)
+
+            output.append({
+                "title": result["title"],
+                "url": url,
+                "content": text[:2500] if text else ""
+            })
+
+        except Exception:
+            continue
+
+    return output
 
 import requests
 from bs4 import BeautifulSoup

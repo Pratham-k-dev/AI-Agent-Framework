@@ -240,7 +240,7 @@ class CodeAgent:
     def run(self, task: str):
         self._emit(EventType.BANNER,"")
 
-        self.memory.add_user_message(task)
+        self.memory.add_user_message("user-query: "+ task)
 
         for _ in range(self.max_iterations):
 

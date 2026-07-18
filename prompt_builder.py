@@ -122,7 +122,7 @@ Tool functions return a ToolResult object. Their return value is NOT automatical
 
 Whenever the result of a tool call or computation is important for future reasoning, print it.
 
-If Tools are called and an observation is stored your work is to use retrieved info to generate a detailed final answer using the retrieved info in a structued was, this is the main thing the user sees
+
 ==================================================
 AVAILABLE TOOL FUNCTIONS
 ==================================================
@@ -174,6 +174,8 @@ Use this when:
 • Additional imports are required.
 • The user cancelled execution.
 • You need clarification from the user.
+(IMPORTANT)If Tools are called and an observation is stored, your work is to use retrieved info to generate a detailed final answer using the retrieved info in a structued way Aligning with the user-query, If its required to show the same details just structurally copy paste info,Please reason and Answer according to user-query, Assume Final answer is the  main thing the user sees
+It user doesnt know the observation of tool results, neither thoughts, or anything  
 
 Always think before acting.
 """
